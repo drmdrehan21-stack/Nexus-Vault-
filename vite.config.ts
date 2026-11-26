@@ -4,8 +4,27 @@ import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+function resolveBasePath(): string {
+  const explicitBase = process.env.VITE_BASE_PATH?.trim();
+  if (explicitBase) {
+    const cleaned = explicitBase.replace(/^\/+|\/+$/g, '');
+    return cleaned ? `/${cleaned}/` : '/';
+  }
+
+  const ghRepo = process.env.GITHUB_REPOSITORY?.split('/')[1]?.trim();
+  if (process.env.GITHUB_ACTIONS === 'true' && ghRepo) {
+    if (ghRepo.toLowerCase().endsWith('.github.io')) {
+      return '/';
+    }
+    return `/${ghRepo}/`;
+  }
+
+  return '/';
+}
+
 export default defineConfig(() => {
   return {
+    base: resolveBasePath(),
     plugins: [
       react(),
       tailwindcss(),
@@ -24,6 +43,13 @@ export default defineConfig(() => {
           const distAssets = path.resolve(distDir, 'src/assets');
           if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
             fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
+          }
+          if (process.env.GITHUB_ACTIONS === 'true') {
+            const indexHtml = path.join(distDir, 'index.html');
+            const fallbackHtml = path.join(distDir, '404.html');
+            if (fs.existsSync(indexHtml)) {
+              fs.copyFileSync(indexHtml, fallbackHtml);
+            }
           }
         },
       },
