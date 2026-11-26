@@ -126,29 +126,6 @@ export function validateAmountValue(raw: string): { valid: boolean; value: numbe
   return { valid: true, value: rounded };
 }
 
-export function validateAppsScriptUrl(raw: string): { valid: boolean; url: string; error?: string } {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    return { valid: false, url: '', error: 'Google Apps Script Web App URL is required.' };
-  }
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'https:') {
-      return { valid: false, url: '', error: 'Endpoint URL must use HTTPS.' };
-    }
-    if (parsed.hostname !== 'script.google.com' && parsed.hostname !== 'script.googleusercontent.com') {
-      return {
-        valid: false,
-        url: '',
-        error: 'URL must be a valid Google Apps Script Web App URL (script.google.com).',
-      };
-    }
-    return { valid: true, url: parsed.toString() };
-  } catch {
-    return { valid: false, url: '', error: 'Enter a valid URL starting with https://script.google.com/' };
-  }
-}
-
 export function generateRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();

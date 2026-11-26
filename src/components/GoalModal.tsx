@@ -76,10 +76,10 @@ export function GoalModal({
       aria-labelledby="goal-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs"
     >
-      <div className="w-full max-w-md rounded-xl border border-[#262626] bg-[#141414]">
-        <div className="flex items-center justify-between border-b border-[#262626] px-6 py-4">
+      <div className="w-full max-w-md rounded-2xl border border-[#292929] bg-[#141414] shadow-[0_24px_60px_rgba(0,0,0,0.65)]">
+        <div className="flex items-center justify-between border-b border-[#292929] px-6 py-4">
           <div>
-            <h2 id="goal-modal-title" className="text-lg font-semibold text-white">
+            <h2 id="goal-modal-title" className="font-display text-lg font-semibold text-white">
               {isEditing ? 'Update Savings Goal' : 'Create Savings Goal'}
             </h2>
             <p className="mt-0.5 text-xs text-[#929292]">
@@ -91,7 +91,7 @@ export function GoalModal({
             onClick={onClose}
             disabled={isSubmitting}
             aria-label="Close goal modal"
-            className="flex h-10 w-10 items-center justify-center rounded-lg text-[#929292] transition-colors hover:bg-[#1B1B1B] hover:text-white disabled:opacity-50"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-[#929292] transition-colors hover:bg-[#1C1C1C] hover:text-white disabled:opacity-50"
           >
             <X className="h-4 w-4" />
           </button>
@@ -101,7 +101,7 @@ export function GoalModal({
           {error && (
             <div
               role="alert"
-              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-300"
+              className="rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-300"
             >
               {error}
             </div>
@@ -119,7 +119,7 @@ export function GoalModal({
               onChange={(e) => setGoalName(e.target.value)}
               placeholder="e.g. Emergency Reserve, MacBook Pro, Goa Trip"
               autoFocus
-              className="h-11 w-full rounded-lg border border-[#262626] bg-[#1B1B1B] px-3.5 text-sm text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
+              className="h-11 w-full rounded-xl border border-[#292929] bg-[#1C1C1C] px-3.5 text-sm text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
             />
           </div>
 
@@ -140,26 +140,26 @@ export function GoalModal({
                 value={targetAmount}
                 onChange={(e) => setTargetAmount(e.target.value)}
                 placeholder="100000"
-                className="h-11 w-full rounded-lg border border-[#262626] bg-[#1B1B1B] pl-9 pr-3.5 font-mono text-base tabular-nums text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
+                className="h-11 w-full rounded-xl border border-[#292929] bg-[#1C1C1C] pl-9 pr-3.5 font-mono text-base tabular-nums text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 border-t border-[#262626] pt-4">
+          <div className="flex items-center justify-end gap-3 border-t border-[#292929] pt-4">
             <button
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="h-10 rounded-lg border border-[#262626] bg-[#1B1B1B] px-4 text-sm font-medium text-white transition-colors hover:border-[#3a3a3a] disabled:opacity-50"
+              className="h-10 rounded-xl border border-[#292929] bg-[#1C1C1C] px-4 text-sm font-medium text-white transition-colors hover:border-[#3d3d3d] disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="h-10 rounded-lg bg-[#35C98A] px-5 text-sm font-semibold text-[#090909] transition-colors hover:bg-[#2eb57b] disabled:cursor-not-allowed disabled:opacity-60"
+              className="h-10 rounded-xl bg-[#35C98A] px-5 text-sm font-semibold text-[#080808] transition-colors hover:bg-[#2eb57b] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmitting ? 'Saving Goal...' : isEditing ? 'Update Goal' : 'Create Goal'}
+              {isSubmitting ? 'Saving to server...' : isEditing ? 'Update Goal' : 'Create Goal'}
             </button>
           </div>
         </form>

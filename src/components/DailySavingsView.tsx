@@ -107,19 +107,17 @@ export function DailySavingsView({
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
       {/* Inline Add Saving Form */}
-      <section className="h-fit rounded-xl border border-[#262626] bg-[#141414] p-6 lg:col-span-4">
-        <div className="space-y-1 border-b border-[#262626] pb-4">
-          <h2 className="text-base font-semibold text-white">Record Saving</h2>
-          <p className="text-xs text-[#929292]">
-            Writes directly to your Google Sheets ledger
-          </p>
+      <section className="h-fit rounded-2xl border border-[#292929] bg-[#141414] p-6 shadow-[0_12px_36px_rgba(0,0,0,0.35)] lg:col-span-4">
+        <div className="space-y-1 border-b border-[#292929] pb-4">
+          <h2 className="font-display text-base font-semibold text-white">Record Saving</h2>
+          <p className="text-xs text-[#929292]">Add a daily deposit to your vault</p>
         </div>
 
         <form onSubmit={handleQuickAdd} className="mt-5 space-y-4">
           {formError && (
             <div
               role="alert"
-              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-300"
+              className="rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-300"
             >
               {formError}
             </div>
@@ -142,7 +140,7 @@ export function DailySavingsView({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="500"
-                className="h-11 w-full rounded-lg border border-[#262626] bg-[#1B1B1B] pl-9 pr-3.5 font-mono text-base tabular-nums text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
+                className="h-11 w-full rounded-xl border border-[#292929] bg-[#1C1C1C] pl-9 pr-3.5 font-mono text-base tabular-nums text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
               />
             </div>
           </div>
@@ -156,7 +154,7 @@ export function DailySavingsView({
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="h-11 w-full rounded-lg border border-[#262626] bg-[#1B1B1B] px-3.5 font-mono text-sm tabular-nums text-white transition-colors focus:border-[#35C98A] focus:outline-none"
+              className="h-11 w-full rounded-xl border border-[#292929] bg-[#1C1C1C] px-3.5 font-mono text-sm tabular-nums text-white transition-colors focus:border-[#35C98A] focus:outline-none"
             />
           </div>
 
@@ -176,26 +174,26 @@ export function DailySavingsView({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. Morning Gullak drop"
-              className="h-11 w-full rounded-lg border border-[#262626] bg-[#1B1B1B] px-3.5 text-sm text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
+              className="h-11 w-full rounded-xl border border-[#292929] bg-[#1C1C1C] px-3.5 text-sm text-white placeholder-[#929292]/50 transition-colors focus:border-[#35C98A] focus:outline-none"
             />
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#35C98A] px-5 text-sm font-semibold text-[#090909] transition-colors hover:bg-[#2eb57b] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#35C98A] px-5 text-sm font-semibold text-[#080808] transition-colors hover:bg-[#2eb57b] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Plus className="h-4 w-4" />
-            <span>{isSubmitting ? 'Saving to Google Sheets...' : 'Save Deposit'}</span>
+            <span>{isSubmitting ? 'Saving to server...' : 'Save Deposit'}</span>
           </button>
         </form>
       </section>
 
       {/* Complete Transaction History */}
-      <section className="rounded-xl border border-[#262626] bg-[#141414] lg:col-span-8">
-        <div className="flex flex-col gap-4 border-b border-[#262626] p-6 sm:flex-row sm:items-center sm:justify-between">
+      <section className="rounded-2xl border border-[#292929] bg-[#141414] shadow-[0_12px_36px_rgba(0,0,0,0.35)] lg:col-span-8">
+        <div className="flex flex-col gap-4 border-b border-[#292929] p-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-base font-semibold text-white">Transaction History</h2>
+            <h2 className="font-display text-base font-semibold text-white">Transaction History</h2>
             <p className="mt-0.5 font-mono text-xs tabular-nums text-[#929292]">
               {filteredAndSorted.length} {filteredAndSorted.length === 1 ? 'entry' : 'entries'} ·{' '}
               {formatCurrency(filteredTotal, currency)} total
@@ -211,7 +209,7 @@ export function DailySavingsView({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search note or date"
                 aria-label="Search transactions"
-                className="h-10 w-full rounded-lg border border-[#262626] bg-[#1B1B1B] pl-8.5 pr-3 text-xs text-white placeholder-[#929292]/60 focus:border-[#35C98A] focus:outline-none sm:w-44"
+                className="h-10 w-full rounded-xl border border-[#292929] bg-[#1C1C1C] pl-8.5 pr-3 text-xs text-white placeholder-[#929292]/60 focus:border-[#35C98A] focus:outline-none sm:w-44"
               />
             </div>
 
@@ -221,7 +219,7 @@ export function DailySavingsView({
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
                 aria-label="Sort transactions"
-                className="h-10 w-full appearance-none rounded-lg border border-[#262626] bg-[#1B1B1B] pl-8.5 pr-7 text-xs text-white focus:border-[#35C98A] focus:outline-none sm:w-auto"
+                className="h-10 w-full appearance-none rounded-xl border border-[#292929] bg-[#1C1C1C] pl-8.5 pr-7 text-xs text-white focus:border-[#35C98A] focus:outline-none sm:w-auto"
               >
                 <option value="date-desc">Newest First</option>
                 <option value="date-asc">Oldest First</option>
@@ -235,9 +233,7 @@ export function DailySavingsView({
         {filteredAndSorted.length === 0 ? (
           <div className="px-6 py-12 text-center">
             <p className="text-sm font-medium text-white">
-              {transactions.length === 0
-                ? 'No transactions found in Google Sheets'
-                : 'No matching transactions'}
+              {transactions.length === 0 ? 'No transactions recorded yet' : 'No matching transactions'}
             </p>
             <p className="mt-1 text-xs text-[#929292]">
               {transactions.length === 0
@@ -246,11 +242,11 @@ export function DailySavingsView({
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-[#262626]">
+          <div className="divide-y divide-[#292929]">
             {filteredAndSorted.map((txn) => (
               <div
                 key={txn.id}
-                className="flex items-center justify-between gap-4 px-6 py-4 transition-colors hover:bg-[#1B1B1B]/60"
+                className="flex items-center justify-between gap-4 px-6 py-4 transition-colors hover:bg-[#1C1C1C]/70"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -271,7 +267,7 @@ export function DailySavingsView({
                     type="button"
                     onClick={() => onEditTransaction(txn)}
                     aria-label={`Edit transaction ${txn.id}`}
-                    className="flex h-10 w-10 items-center justify-center rounded-lg text-[#929292] transition-colors hover:bg-[#1B1B1B] hover:text-white"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl text-[#929292] transition-colors hover:bg-[#1C1C1C] hover:text-white"
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
@@ -279,7 +275,7 @@ export function DailySavingsView({
                     type="button"
                     onClick={() => onDeleteTransaction(txn)}
                     aria-label={`Delete transaction ${txn.id}`}
-                    className="flex h-10 w-10 items-center justify-center rounded-lg text-[#929292] transition-colors hover:bg-red-500/10 hover:text-red-400"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl text-[#929292] transition-colors hover:bg-red-500/10 hover:text-red-400"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>

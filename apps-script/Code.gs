@@ -44,6 +44,9 @@ var CURRENCY_SYMBOLS = {
 };
 var LOCK_TIMEOUT_MS = 15000;
 var IDEMPOTENCY_TTL_SECONDS = 300; // 5 minutes
+var MAX_PIN_ATTEMPTS = 5;
+var PIN_LOCKOUT_MS = 5 * 60 * 1000; // 5 minutes
+var PIN_HASH_ROUNDS = 10000;
 
 /**
  * ONE-TIME SETUP FUNCTION
@@ -206,6 +209,18 @@ function doPost(e) {
 
       case 'updateSettings':
         return handleUpdateSettings_(payload);
+
+      case 'getPinStatus':
+        return handleGetPinStatus_();
+
+      case 'setupPin':
+        return handleSetupPin_(payload);
+
+      case 'verifyPin':
+        return handleVerifyPin_(payload);
+
+      case 'changePin':
+        return handleChangePin_(payload);
 
       default:
         return errorResponse_('UNKNOWN_ACTION', 'Unsupported POST action: "' + action + '"');
@@ -987,6 +1002,242 @@ function constantTimeEquals_(a, b) {
     diff |= charA ^ charB;
   }
   return diff === 0;
+}
+
+/* ============================================================================
+ * 4-DIGIT PIN SECURITY HANDLERS (Salted Stretched SHA-256 + Lockout)
+ * ==========================================================================*/
+
+function handleGetPinStatus_() {
+  var props = PropertiesService.getScriptProperties();
+  var pinConfigured = Boolean(props.getProperty('VAULT_PIN_HASH') && props.getProperty('VAULT_PIN_SALT'));
+  var lockState = getPinLockState_(props);
+
+  return successResponse_({
+    pinConfigured: pinConfigured,
+    locked: lockState.locked,
+    remainingSeconds: lockState.remainingSeconds,
+    attemptsRemaining: lockState.attemptsRemaining,
+    maxAttempts: MAX_PIN_ATTEMPTS,
+  });
+}
+
+function handleSetupPin_(payload) {
+  var pin = String(payload.pin || '').trim();
+  var confirmPin = String(payload.confirmPin || '').trim();
+
+  if (!/^\d{4}$/.test(pin)) {
+    return errorResponse_('INVALID_PIN_FORMAT', 'PIN must be exactly 4 digits.');
+  }
+  if (pin !== confirmPin) {
+    return errorResponse_('PIN_MISMATCH', 'PINs do not match.');
+  }
+
+  return withScriptLock_(function () {
+    var props = PropertiesService.getScriptProperties();
+    if (props.getProperty('VAULT_PIN_HASH')) {
+      return errorResponse_('PIN_ALREADY_SET', 'A PIN is already configured.');
+    }
+
+    var salt = Utilities.getUuid().replace(/-/g, '');
+    var hash = hashPinWithSalt_(pin, salt);
+
+    props.setProperties({
+      VAULT_PIN_SALT: salt,
+      VAULT_PIN_HASH: hash,
+      VAULT_PIN_ATTEMPTS: '0',
+      VAULT_PIN_LOCK_UNTIL: '0',
+    });
+
+    return successResponse_({
+      pinConfigured: true,
+    });
+  });
+}
+
+function handleVerifyPin_(payload) {
+  var pin = String(payload.pin || '').trim();
+  if (!/^\d{4}$/.test(pin)) {
+    return errorResponse_('INVALID_PIN_FORMAT', 'Enter a 4-digit PIN.');
+  }
+
+  return withScriptLock_(function () {
+    var props = PropertiesService.getScriptProperties();
+    var salt = props.getProperty('VAULT_PIN_SALT') || '';
+    var expectedHash = props.getProperty('VAULT_PIN_HASH') || '';
+
+    if (!salt || !expectedHash) {
+      return errorResponse_('PIN_NOT_CONFIGURED', 'PIN has not been set up yet.');
+    }
+
+    var lockState = getPinLockState_(props);
+    if (lockState.locked) {
+      return errorResponse_(
+        'PIN_LOCKED',
+        'Too many incorrect attempts. Try again in ' + lockState.remainingSeconds + ' seconds.'
+      );
+    }
+
+    var candidateHash = hashPinWithSalt_(pin, salt);
+    if (!constantTimeEquals_(candidateHash, expectedHash)) {
+      var result = recordFailedPinAttempt_(props);
+      if (result.locked) {
+        return errorResponse_(
+          'PIN_LOCKED',
+          'Too many incorrect attempts. Try again in ' + result.remainingSeconds + ' seconds.'
+        );
+      }
+      return errorResponse_(
+        'INVALID_PIN',
+        'Incorrect PIN. ' + result.attemptsRemaining + ' attempts remaining.'
+      );
+    }
+
+    clearPinAttempts_(props);
+    return successResponse_({
+      verified: true,
+    });
+  });
+}
+
+function handleChangePin_(payload) {
+  var currentPin = String(payload.currentPin || '').trim();
+  var newPin = String(payload.newPin || '').trim();
+  var confirmPin = String(payload.confirmPin || '').trim();
+
+  if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin)) {
+    return errorResponse_('INVALID_PIN_FORMAT', 'PINs must be exactly 4 digits.');
+  }
+  if (newPin !== confirmPin) {
+    return errorResponse_('PIN_MISMATCH', 'New PIN and confirmation do not match.');
+  }
+
+  return withScriptLock_(function () {
+    var props = PropertiesService.getScriptProperties();
+    var salt = props.getProperty('VAULT_PIN_SALT') || '';
+    var expectedHash = props.getProperty('VAULT_PIN_HASH') || '';
+
+    if (!salt || !expectedHash) {
+      return errorResponse_('PIN_NOT_CONFIGURED', 'PIN has not been set up yet.');
+    }
+
+    var lockState = getPinLockState_(props);
+    if (lockState.locked) {
+      return errorResponse_(
+        'PIN_LOCKED',
+        'Too many incorrect attempts. Try again in ' + lockState.remainingSeconds + ' seconds.'
+      );
+    }
+
+    var currentHash = hashPinWithSalt_(currentPin, salt);
+    if (!constantTimeEquals_(currentHash, expectedHash)) {
+      var result = recordFailedPinAttempt_(props);
+      if (result.locked) {
+        return errorResponse_(
+          'PIN_LOCKED',
+          'Too many incorrect attempts. Try again in ' + result.remainingSeconds + ' seconds.'
+        );
+      }
+      return errorResponse_(
+        'INVALID_PIN',
+        'Current PIN is incorrect. ' + result.attemptsRemaining + ' attempts remaining.'
+      );
+    }
+
+    var newSalt = Utilities.getUuid().replace(/-/g, '');
+    var newHash = hashPinWithSalt_(newPin, newSalt);
+    props.setProperties({
+      VAULT_PIN_SALT: newSalt,
+      VAULT_PIN_HASH: newHash,
+      VAULT_PIN_ATTEMPTS: '0',
+      VAULT_PIN_LOCK_UNTIL: '0',
+    });
+
+    return successResponse_({
+      changed: true,
+    });
+  });
+}
+
+function getPinLockState_(props) {
+  var now = Date.now();
+  var lockUntil = Number(props.getProperty('VAULT_PIN_LOCK_UNTIL') || '0');
+  if (isFinite(lockUntil) && lockUntil > now) {
+    return {
+      locked: true,
+      remainingSeconds: Math.ceil((lockUntil - now) / 1000),
+      attemptsRemaining: 0,
+    };
+  }
+  if (lockUntil > 0 && lockUntil <= now) {
+    props.setProperties({
+      VAULT_PIN_ATTEMPTS: '0',
+      VAULT_PIN_LOCK_UNTIL: '0',
+    });
+    return {
+      locked: false,
+      remainingSeconds: 0,
+      attemptsRemaining: MAX_PIN_ATTEMPTS,
+    };
+  }
+  var attempts = Number(props.getProperty('VAULT_PIN_ATTEMPTS') || '0');
+  if (!isFinite(attempts) || attempts < 0) attempts = 0;
+  return {
+    locked: false,
+    remainingSeconds: 0,
+    attemptsRemaining: Math.max(0, MAX_PIN_ATTEMPTS - attempts),
+  };
+}
+
+function recordFailedPinAttempt_(props) {
+  var attempts = Number(props.getProperty('VAULT_PIN_ATTEMPTS') || '0');
+  if (!isFinite(attempts) || attempts < 0) attempts = 0;
+  attempts += 1;
+
+  if (attempts >= MAX_PIN_ATTEMPTS) {
+    var lockUntil = Date.now() + PIN_LOCKOUT_MS;
+    props.setProperties({
+      VAULT_PIN_ATTEMPTS: String(attempts),
+      VAULT_PIN_LOCK_UNTIL: String(lockUntil),
+    });
+    return {
+      locked: true,
+      remainingSeconds: Math.ceil(PIN_LOCKOUT_MS / 1000),
+      attemptsRemaining: 0,
+    };
+  }
+
+  props.setProperty('VAULT_PIN_ATTEMPTS', String(attempts));
+  return {
+    locked: false,
+    remainingSeconds: 0,
+    attemptsRemaining: Math.max(0, MAX_PIN_ATTEMPTS - attempts),
+  };
+}
+
+function clearPinAttempts_(props) {
+  props.setProperties({
+    VAULT_PIN_ATTEMPTS: '0',
+    VAULT_PIN_LOCK_UNTIL: '0',
+  });
+}
+
+function hashPinWithSalt_(pin, salt) {
+  var value = salt + ':' + pin;
+  for (var i = 0; i < PIN_HASH_ROUNDS; i++) {
+    var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8);
+    value = bytesToHex_(digest);
+  }
+  return value;
+}
+
+function bytesToHex_(bytes) {
+  var hex = [];
+  for (var i = 0; i < bytes.length; i++) {
+    var b = (bytes[i] + 256) % 256;
+    hex.push((b < 16 ? '0' : '') + b.toString(16));
+  }
+  return hex.join('');
 }
 
 function withScriptLock_(fn) {

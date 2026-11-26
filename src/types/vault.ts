@@ -2,6 +2,15 @@ export type CurrencyCode = 'INR' | 'USD' | 'EUR' | 'GBP';
 
 export type NavSection = 'dashboard' | 'savings' | 'calendar' | 'settings';
 
+export interface AuthStatusResponse {
+  backendConfigured: boolean;
+  pinConfigured: boolean;
+  authenticated: boolean;
+  locked: boolean;
+  remainingSeconds: number;
+  attemptsRemaining: number;
+}
+
 export interface Transaction {
   id: string;
   date: string; // YYYY-MM-DD
@@ -58,11 +67,6 @@ export interface VaultBootstrapData {
   thisMonth: MonthlySummary;
   calendarActivity: CalendarActivity;
   dateWiseSavings: Record<string, CalendarDayActivity>;
-}
-
-export interface VaultConnectionConfig {
-  endpointUrl: string;
-  accessKey: string;
 }
 
 export interface TransactionInput {

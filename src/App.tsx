@@ -1,24 +1,32 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { CalendarView } from './components/CalendarView';
 import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
 import { DailySavingsView } from './components/DailySavingsView';
 import { DashboardView } from './components/DashboardView';
 import { GoalModal } from './components/GoalModal';
 import { LayoutShell } from './components/LayoutShell';
+import { PinLockScreen } from './components/PinLockScreen';
 import { SettingsView } from './components/SettingsView';
 import { ToastBanner } from './components/ToastBanner';
 import { TransactionModal } from './components/TransactionModal';
-import { VaultAuthGate } from './components/VaultAuthGate';
 import {
   addTransaction,
+  changePin,
+  configureBackendOnce,
   deleteTransaction,
+  getAuthStatus,
   getBootstrapData,
+  logoutVault,
+  setupPin,
   updateSettings,
   updateTransaction,
   upsertGoal,
   VaultApiError,
+  verifyPin,
 } from './services/vaultApi';
 import {
+  AuthStatusResponse,
   CurrencyCode,
   GoalInput,
   NavSection,
@@ -26,19 +34,17 @@ import {
   Transaction,
   TransactionInput,
   VaultBootstrapData,
-  VaultConnectionConfig,
 } from './types/vault';
 import { generateRequestId } from './utils/format';
 
-const ENV_APPS_SCRIPT_URL = (import.meta.env.VITE_APPS_SCRIPT_URL as string | undefined)?.trim() || '';
-
 export default function App() {
-  const [config, setConfig] = useState<VaultConnectionConfig | null>(null);
-  const [vaultData, setVaultData] = useState<VaultBootstrapData | null>(null);
-  const [activeSection, setActiveSection] = useState<NavSection>('dashboard');
+  const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [vaultData, setVaultData] = useState<VaultBootstrapData | null>(null);
+  const [isLoadingVault, setIsLoadingVault] = useState(false);
+  const [activeSection, setActiveSection] = useState<NavSection>('dashboard');
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -70,52 +76,174 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const fetchVaultData = useCallback(async (activeConfig: VaultConnectionConfig) => {
+  const fetchVaultData = useCallback(async () => {
     const now = new Date();
-    const data = await getBootstrapData(
-      activeConfig,
-      now.getFullYear(),
-      now.getMonth() + 1
-    );
+    const data = await getBootstrapData(now.getFullYear(), now.getMonth() + 1);
     setVaultData(data);
     setSyncError(null);
     return data;
   }, []);
 
-  const handleUnlock = async (endpointUrl: string, accessKey: string) => {
-    setAuthLoading(true);
-    setAuthError(null);
-    const nextConfig: VaultConnectionConfig = { endpointUrl, accessKey };
+  const syncAuthSession = useCallback(async () => {
+    setIsCheckingStatus(true);
+    setConnectionError(null);
     try {
-      await fetchVaultData(nextConfig);
-      setConfig(nextConfig);
+      const status = await getAuthStatus();
+      setAuthStatus(status);
+
+      if (status.authenticated) {
+        setIsLoadingVault(true);
+        try {
+          await fetchVaultData();
+        } catch (err) {
+          if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+            setAuthStatus((prev) => (prev ? { ...prev, authenticated: false } : prev));
+            setVaultData(null);
+          } else {
+            setSyncError(
+              err instanceof Error ? err.message : 'Unable to load savings data from server.'
+            );
+          }
+        } finally {
+          setIsLoadingVault(false);
+        }
+      } else {
+        setVaultData(null);
+      }
     } catch (err) {
-      const msg =
-        err instanceof VaultApiError
-          ? err.message
-          : 'Unable to connect to Google Apps Script backend.';
-      setAuthError(msg);
+      setAuthStatus(null);
+      setConnectionError(err instanceof Error ? err.message : 'Unable to connect to server.');
     } finally {
-      setAuthLoading(false);
+      setIsCheckingStatus(false);
+    }
+  }, [fetchVaultData]);
+
+  useEffect(() => {
+    void syncAuthSession();
+  }, [syncAuthSession]);
+
+  const handleConfigureBackend = async (endpointUrl: string, accessKey: string) => {
+    await configureBackendOnce(endpointUrl, accessKey);
+    await syncAuthSession();
+    pushToast('success', 'Server connected.');
+  };
+
+  const handleSetupPin = async (pin: string, confirmPin: string) => {
+    try {
+      await setupPin(pin, confirmPin);
+    } catch (err) {
+      if (err instanceof VaultApiError && err.code === 'PIN_ALREADY_SET') {
+        try {
+          const refreshed = await getAuthStatus();
+          setAuthStatus(refreshed);
+        } catch {
+          // Ignore status refresh failure
+        }
+      }
+      throw err;
+    }
+
+    setAuthStatus({
+      backendConfigured: true,
+      pinConfigured: true,
+      authenticated: true,
+      locked: false,
+      remainingSeconds: 0,
+      attemptsRemaining: 5,
+    });
+    pushToast('success', 'Vault PIN created.');
+
+    setIsLoadingVault(true);
+    setSyncError(null);
+    try {
+      await fetchVaultData();
+    } catch (err) {
+      if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+        setAuthStatus((prev) => (prev ? { ...prev, authenticated: false } : prev));
+        setVaultData(null);
+        throw err;
+      }
+      setSyncError(
+        err instanceof Error ? err.message : 'Unable to load savings data from server.'
+      );
+    } finally {
+      setIsLoadingVault(false);
     }
   };
 
-  const handleLockVault = () => {
-    setConfig(null);
+  const handleVerifyPin = async (pin: string) => {
+    try {
+      await verifyPin(pin);
+    } catch (err) {
+      try {
+        const refreshed = await getAuthStatus();
+        setAuthStatus(refreshed);
+      } catch {
+        // Ignore secondary status refresh error
+      }
+      throw err;
+    }
+
+    setAuthStatus({
+      backendConfigured: true,
+      pinConfigured: true,
+      authenticated: true,
+      locked: false,
+      remainingSeconds: 0,
+      attemptsRemaining: 5,
+    });
+
+    setIsLoadingVault(true);
+    setSyncError(null);
+    try {
+      await fetchVaultData();
+    } catch (err) {
+      if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+        setAuthStatus((prev) => (prev ? { ...prev, authenticated: false } : prev));
+        setVaultData(null);
+        throw err;
+      }
+      setSyncError(
+        err instanceof Error ? err.message : 'Unable to load savings data from server.'
+      );
+    } finally {
+      setIsLoadingVault(false);
+    }
+  };
+
+  const handleChangePin = async (
+    currentPin: string,
+    newPin: string,
+    confirmPin: string
+  ) => {
+    await changePin(currentPin, newPin, confirmPin);
+    pushToast('success', 'PIN updated successfully.');
+  };
+
+  const handleLockVault = async () => {
+    try {
+      await logoutVault();
+    } catch {
+      // Clear local state regardless
+    }
     setVaultData(null);
     setSyncError(null);
-    setAuthError(null);
     setActiveSection('dashboard');
+    await syncAuthSession();
   };
 
   const handleManualRefresh = async () => {
-    if (!config || isRefreshing) return;
+    if (isRefreshing) return;
     setIsRefreshing(true);
     try {
-      await fetchVaultData(config);
-      pushToast('success', 'Synced with Google Sheets.');
+      await fetchVaultData();
+      pushToast('success', 'Synced with server.');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Sync failed.';
+      if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+        await handleLockVault();
+        return;
+      }
+      const msg = err instanceof Error ? err.message : 'Unable to connect to server.';
       setSyncError(msg);
       pushToast('error', msg);
     } finally {
@@ -136,24 +264,28 @@ export default function App() {
   };
 
   const handleSaveTransaction = async (input: TransactionInput) => {
-    if (!config || isSubmittingTxn) return;
+    if (isSubmittingTxn) return;
     setIsSubmittingTxn(true);
     try {
       if (input.id) {
-        await updateTransaction(config, input);
-        await fetchVaultData(config);
+        await updateTransaction(input);
+        await fetchVaultData();
         setIsTxnModalOpen(false);
         setEditingTxn(null);
-        pushToast('success', 'Saving entry updated in Google Sheets.');
+        pushToast('success', 'Updated successfully.');
       } else {
-        await addTransaction(config, input, generateRequestId());
-        await fetchVaultData(config);
+        await addTransaction(input, generateRequestId());
+        await fetchVaultData();
         setIsTxnModalOpen(false);
         setModalInitialDate(undefined);
-        pushToast('success', 'Saving recorded in Google Sheets.');
+        pushToast('success', 'Saved successfully.');
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save transaction.';
+      if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+        await handleLockVault();
+        return;
+      }
+      const msg = err instanceof Error ? err.message : 'Unable to connect to server.';
       pushToast('error', msg);
       throw err;
     } finally {
@@ -162,15 +294,19 @@ export default function App() {
   };
 
   const handleConfirmDelete = async () => {
-    if (!config || !deletingTxn || isDeletingTxn) return;
+    if (!deletingTxn || isDeletingTxn) return;
     setIsDeletingTxn(true);
     try {
-      await deleteTransaction(config, deletingTxn.id);
-      await fetchVaultData(config);
+      await deleteTransaction(deletingTxn.id);
+      await fetchVaultData();
       setDeletingTxn(null);
-      pushToast('success', 'Saving entry deleted from Google Sheets.');
+      pushToast('success', 'Deleted successfully.');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to delete transaction.';
+      if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+        await handleLockVault();
+        return;
+      }
+      const msg = err instanceof Error ? err.message : 'Unable to connect to server.';
       pushToast('error', msg);
     } finally {
       setIsDeletingTxn(false);
@@ -178,15 +314,19 @@ export default function App() {
   };
 
   const handleSaveGoal = async (input: GoalInput) => {
-    if (!config || isSavingGoal) return;
+    if (isSavingGoal) return;
     setIsSavingGoal(true);
     try {
-      await upsertGoal(config, input, generateRequestId());
-      await fetchVaultData(config);
+      await upsertGoal(input, generateRequestId());
+      await fetchVaultData();
       setIsGoalModalOpen(false);
-      pushToast('success', 'Savings goal saved to Google Sheets.');
+      pushToast('success', 'Saved successfully.');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save goal.';
+      if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+        await handleLockVault();
+        return;
+      }
+      const msg = err instanceof Error ? err.message : 'Unable to connect to server.';
       pushToast('error', msg);
       throw err;
     } finally {
@@ -195,29 +335,87 @@ export default function App() {
   };
 
   const handleUpdateCurrency = async (currency: CurrencyCode) => {
-    if (!config || isUpdatingSettings) return;
+    if (isUpdatingSettings) return;
     setIsUpdatingSettings(true);
     try {
-      await updateSettings(config, currency);
-      await fetchVaultData(config);
+      await updateSettings(currency);
+      await fetchVaultData();
       pushToast('success', `Currency updated to ${currency}.`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to update currency.';
+      if (err instanceof VaultApiError && err.code === 'SESSION_REQUIRED') {
+        await handleLockVault();
+        return;
+      }
+      const msg = err instanceof Error ? err.message : 'Unable to connect to server.';
       pushToast('error', msg);
     } finally {
       setIsUpdatingSettings(false);
     }
   };
 
-  if (!config || !vaultData) {
+  if (!authStatus?.authenticated) {
     return (
       <>
-        <VaultAuthGate
-          defaultEndpointUrl={ENV_APPS_SCRIPT_URL}
-          isLoading={authLoading}
-          errorMessage={authError}
-          onUnlock={handleUnlock}
+        <PinLockScreen
+          authStatus={authStatus}
+          isCheckingStatus={isCheckingStatus}
+          connectionError={connectionError}
+          onRetryStatus={syncAuthSession}
+          onConfigureBackend={handleConfigureBackend}
+          onSetupPin={handleSetupPin}
+          onVerifyPin={handleVerifyPin}
         />
+        <ToastBanner toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  if (isLoadingVault && !vaultData) {
+    return (
+      <>
+        <div className="flex min-h-screen flex-col items-center justify-center bg-[#080808] px-4">
+          <div className="w-full max-w-xs rounded-2xl border border-[#292929] bg-[#141414] p-8 text-center">
+            <RefreshCw className="mx-auto h-6 w-6 animate-spin text-[#35C98A]" />
+            <p className="mt-4 text-sm font-medium text-white">Loading Nexus Vault...</p>
+            <p className="mt-1 text-xs text-[#929292]">Fetching your records from server</p>
+          </div>
+        </div>
+        <ToastBanner toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  if (!vaultData) {
+    return (
+      <>
+        <div className="flex min-h-screen flex-col items-center justify-center bg-[#080808] px-4">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl border border-[#292929] bg-[#141414] p-6 text-center">
+            <h2 className="font-display text-lg font-semibold text-white">
+              Unable to load vault data
+            </h2>
+            <p className="text-xs leading-relaxed text-[#929292]">
+              {syncError || 'Unable to connect to server.'}
+            </p>
+            <div className="flex flex-col gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => void handleManualRefresh()}
+                disabled={isRefreshing}
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#35C98A] px-5 text-sm font-semibold text-[#080808] transition-colors hover:bg-[#2eb57b] disabled:opacity-60"
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span>{isRefreshing ? 'Retrying...' : 'Retry Sync'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLockVault()}
+                className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-[#292929] bg-[#1C1C1C] px-4 text-xs font-medium text-[#929292] transition-colors hover:text-white"
+              >
+                Lock Vault
+              </button>
+            </div>
+          </div>
+        </div>
         <ToastBanner toasts={toasts} onDismiss={dismissToast} />
       </>
     );
@@ -233,7 +431,7 @@ export default function App() {
         onNavigate={setActiveSection}
         onOpenAddSaving={() => openAddSaving()}
         onRefresh={handleManualRefresh}
-        onLockVault={handleLockVault}
+        onLockVault={() => void handleLockVault()}
       >
         {syncError && (
           <div
@@ -244,7 +442,7 @@ export default function App() {
             <button
               type="button"
               onClick={handleManualRefresh}
-              className="rounded-md border border-red-400/40 px-3 py-1.5 font-medium text-white hover:bg-red-500/20"
+              className="rounded-lg border border-red-400/40 px-3 py-1.5 font-medium text-white hover:bg-red-500/20"
             >
               Retry Sync
             </button>
@@ -292,13 +490,12 @@ export default function App() {
           <SettingsView
             currency={currency}
             currentGoal={vaultData.currentGoal}
-            transactions={vaultData.transactions}
-            endpointUrl={config.endpointUrl}
             isUpdatingSettings={isUpdatingSettings}
             isSavingGoal={isSavingGoal}
             onUpdateCurrency={handleUpdateCurrency}
             onSaveGoal={handleSaveGoal}
-            onLockVault={handleLockVault}
+            onChangePin={handleChangePin}
+            onLockVault={() => void handleLockVault()}
           />
         )}
       </LayoutShell>

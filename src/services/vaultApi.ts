@@ -1,4 +1,5 @@
 import {
+  AuthStatusResponse,
   CalendarActivity,
   CalendarDayActivity,
   CurrencyCode,
@@ -8,7 +9,6 @@ import {
   Transaction,
   TransactionInput,
   VaultBootstrapData,
-  VaultConnectionConfig,
 } from '../types/vault';
 import { getDaysInMonth } from '../utils/format';
 
@@ -16,93 +16,78 @@ const DEFAULT_TIMEOUT_MS = 25000;
 
 export class VaultApiError extends Error {
   public readonly code: string;
+  public readonly status?: number;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, status?: number) {
     super(message);
     this.name = 'VaultApiError';
     this.code = code;
+    this.status = status;
   }
 }
 
-interface AppsScriptResponse<T> {
+interface ServerEnvelope<T> {
   ok?: boolean;
   success?: boolean;
   data?: T;
   error?: {
-    code: string;
-    message: string;
+    code?: string;
+    message?: string;
   };
 }
 
-/**
- * Google Apps Script Web Apps do not respond to CORS preflight OPTIONS requests.
- * To guarantee cross-origin compatibility from Cloudflare Pages / browsers:
- * 1. Send HTTP POST with Content-Type: text/plain;charset=utf-8 (a CORS "simple request" header).
- * 2. Omit custom HTTP headers (send accessKey inside the JSON body over HTTPS).
- * 3. Use redirect: 'follow' so the 302 redirect to script.googleusercontent.com completes cleanly.
- */
-async function callAppsScript<T>(
-  config: VaultConnectionConfig,
-  action: string,
-  payload: Record<string, unknown> = {},
-  requestId?: string
+// Ephemeral in-memory fallback token (only for current page if iframe blocks cookies; never stored in localStorage/sessionStorage)
+let memorySessionToken: string | null = null;
+
+async function requestServer<T>(
+  path: string,
+  options: {
+    method?: 'GET' | 'POST';
+    body?: Record<string, unknown>;
+  } = {}
 ): Promise<T> {
-  const url = config.endpointUrl.trim();
-  const accessKey = config.accessKey.trim();
-
-  if (!url) {
-    throw new VaultApiError('MISSING_ENDPOINT', 'Google Apps Script Web App URL is not configured.');
-  }
-  if (!accessKey) {
-    throw new VaultApiError('MISSING_ACCESS_KEY', 'Vault Access Key is required.');
-  }
-
+  const method = options.method ?? 'POST';
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, {
-      method: 'POST',
+    const response = await fetch(path, {
+      method,
+      credentials: 'include',
       headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
+        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+        'X-Requested-With': 'XMLHttpRequest',
+        ...(memorySessionToken ? { Authorization: `Bearer ${memorySessionToken}` } : {}),
       },
-      body: JSON.stringify({
-        ...payload,
-        action,
-        accessKey,
-        requestId: requestId || '',
-        payload,
-      }),
-      redirect: 'follow',
+      body: method === 'POST' ? JSON.stringify(options.body ?? {}) : undefined,
       signal: controller.signal,
     });
 
-    if (!response.ok) {
-      throw new VaultApiError(
-        'HTTP_ERROR',
-        `Backend returned HTTP ${response.status}. Verify your Apps Script Web App deployment.`
-      );
-    }
-
-    let parsed: AppsScriptResponse<T>;
+    let parsed: ServerEnvelope<T> | null = null;
     try {
-      parsed = (await response.json()) as AppsScriptResponse<T>;
+      parsed = (await response.json()) as ServerEnvelope<T>;
     } catch {
       throw new VaultApiError(
         'INVALID_RESPONSE',
-        'Received non-JSON response from Apps Script. Ensure Web App access is set to "Anyone" and the latest version is deployed.'
+        'Unable to connect to server.',
+        response.status
       );
     }
 
     if (!parsed || typeof parsed !== 'object') {
-      throw new VaultApiError('INVALID_RESPONSE', 'Unexpected response format from backend.');
+      throw new VaultApiError('INVALID_RESPONSE', 'Unable to connect to server.', response.status);
     }
 
-    const isSuccess = parsed.ok === true || parsed.success === true;
+    const isSuccess = response.ok && (parsed.ok === true || parsed.success === true);
     if (!isSuccess) {
+      const code = parsed.error?.code || 'SERVER_ERROR';
+      if (response.status === 401 && code === 'SESSION_REQUIRED') {
+        memorySessionToken = null;
+      }
       throw new VaultApiError(
-        parsed.error?.code || 'API_ERROR',
-        parsed.error?.message || 'Operation failed on Google Sheets backend.'
+        code,
+        parsed.error?.message || 'Unable to connect to server.',
+        response.status
       );
     }
 
@@ -112,19 +97,96 @@ async function callAppsScript<T>(
       throw err;
     }
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new VaultApiError(
-        'TIMEOUT',
-        'Request timed out waiting for Google Apps Script. Please try again.'
-      );
+      throw new VaultApiError('TIMEOUT', 'Server request timed out. Please try again.');
     }
-    throw new VaultApiError(
-      'NETWORK_ERROR',
-      'Unable to reach Google Apps Script backend. Check your internet connection and Web App URL.'
-    );
+    throw new VaultApiError('NETWORK_ERROR', 'Unable to connect to server.');
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
 }
+
+/* ============================================================================
+ * AUTHENTICATION & SERVER CONNECTION ROUTES
+ * ==========================================================================*/
+
+export async function getAuthStatus(): Promise<AuthStatusResponse> {
+  return requestServer<AuthStatusResponse>('/api/auth/status', { method: 'GET' });
+}
+
+export async function configureBackendOnce(
+  endpointUrl: string,
+  accessKey: string
+): Promise<{ configured: boolean }> {
+  return requestServer<{ configured: boolean }>('/api/admin/configure-backend', {
+    method: 'POST',
+    body: { endpointUrl, accessKey },
+  });
+}
+
+export async function setupPin(
+  pin: string,
+  confirmPin: string
+): Promise<{ authenticated: boolean; pinConfigured: boolean }> {
+  const data = await requestServer<{
+    authenticated: boolean;
+    pinConfigured: boolean;
+    sessionToken?: string;
+  }>('/api/auth/setup-pin', {
+    method: 'POST',
+    body: { pin, confirmPin },
+  });
+  if (data.sessionToken) {
+    memorySessionToken = data.sessionToken;
+  }
+  return { authenticated: data.authenticated, pinConfigured: data.pinConfigured };
+}
+
+export async function verifyPin(pin: string): Promise<{ authenticated: boolean }> {
+  const data = await requestServer<{ authenticated: boolean; sessionToken?: string }>(
+    '/api/auth/verify-pin',
+    {
+      method: 'POST',
+      body: { pin },
+    }
+  );
+  if (data.sessionToken) {
+    memorySessionToken = data.sessionToken;
+  }
+  return { authenticated: data.authenticated };
+}
+
+export async function changePin(
+  currentPin: string,
+  newPin: string,
+  confirmPin: string
+): Promise<{ changed: boolean }> {
+  const data = await requestServer<{ changed: boolean; sessionToken?: string }>(
+    '/api/auth/change-pin',
+    {
+      method: 'POST',
+      body: { currentPin, newPin, confirmPin },
+    }
+  );
+  if (data.sessionToken) {
+    memorySessionToken = data.sessionToken;
+  }
+  return { changed: data.changed };
+}
+
+export async function logoutVault(): Promise<{ locked: boolean }> {
+  try {
+    return await requestServer<{ locked: boolean }>('/api/auth/logout', {
+      method: 'POST',
+      body: {},
+    });
+  } finally {
+    memorySessionToken = null;
+  }
+}
+
+/* ============================================================================
+ * DATA NORMALIZATION & VAULT API ROUTES
+ * ==========================================================================*/
 
 function normalizeCurrency(raw: unknown): CurrencyCode {
   const upper = String(raw || 'INR').trim().toUpperCase();
@@ -146,8 +208,7 @@ function normalizeTransaction(raw: Record<string, unknown>): Transaction {
 
 function normalizeGoal(
   rawGoal: Record<string, unknown> | null | undefined,
-  totalSavings: number,
-  fallbackStats?: { completionPercentage?: number; remainingAmount?: number }
+  totalSavings: number
 ): SavingsGoal | null {
   if (!rawGoal) return null;
   const goalName = String(rawGoal.goalName ?? rawGoal.GoalName ?? '').trim();
@@ -156,24 +217,15 @@ function normalizeGoal(
     return null;
   }
 
-  const currentSavings = Math.round(
-    Number(rawGoal.currentSavings ?? totalSavings) * 100
-  ) / 100;
+  const currentSavings =
+    Math.round(Number(rawGoal.currentSavings ?? totalSavings) * 100) / 100;
   const remainingAmount = Math.max(
     0,
-    Math.round(
-      Number(
-        rawGoal.remainingAmount ??
-          fallbackStats?.remainingAmount ??
-          targetAmount - currentSavings
-      ) * 100
-    ) / 100
+    Math.round(Number(rawGoal.remainingAmount ?? targetAmount - currentSavings) * 100) / 100
   );
   const rawPct =
     rawGoal.completionPercentage ??
-    fallbackStats?.completionPercentage ??
     (targetAmount > 0 ? Math.min(100, (currentSavings / targetAmount) * 100) : 0);
-  const completionPercentage = Math.round(Number(rawPct) * 10) / 10;
 
   return {
     goalId: String(rawGoal.goalId ?? rawGoal.GoalID ?? '').trim(),
@@ -181,7 +233,7 @@ function normalizeGoal(
     targetAmount: Math.round(targetAmount * 100) / 100,
     currentSavings,
     remainingAmount,
-    completionPercentage,
+    completionPercentage: Math.round(Number(rawPct) * 10) / 10,
     isCompleted: Boolean(rawGoal.isCompleted ?? currentSavings >= targetAmount),
     createdAt: String(rawGoal.createdAt ?? rawGoal.CreatedAt ?? '').trim(),
     updatedAt: String(rawGoal.updatedAt ?? rawGoal.UpdatedAt ?? '').trim(),
@@ -202,178 +254,72 @@ function buildDateWiseFromTransactions(
   return map;
 }
 
+async function callVault<T>(
+  action: string,
+  payload: Record<string, unknown> = {},
+  requestId = ''
+): Promise<T> {
+  return requestServer<T>('/api/vault', {
+    method: 'POST',
+    body: { action, payload, requestId },
+  });
+}
+
 export async function getBootstrapData(
-  config: VaultConnectionConfig,
   year: number,
   month: number
 ): Promise<VaultBootstrapData> {
-  try {
-    const raw = await callAppsScript<Record<string, unknown>>(config, 'getBootstrapData', {
-      year,
-      month,
-    });
-    const rawTxns = Array.isArray(raw.transactions)
-      ? (raw.transactions as Record<string, unknown>[]).map(normalizeTransaction)
-      : [];
-    const totalSavings =
-      typeof raw.totalSavings === 'number'
-        ? raw.totalSavings
-        : rawTxns.reduce((sum, t) => sum + t.amount, 0);
-    const currency = normalizeCurrency(
-      (raw.settings as Record<string, unknown> | undefined)?.currency ?? raw.currency
-    );
-
-    const rawMonth = (raw.thisMonth || {}) as Record<string, unknown>;
-    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-    const thisMonth: MonthlySummary = {
-      year: Number(rawMonth.year ?? year),
-      month: Number(rawMonth.month ?? month),
-      monthPrefix: String(rawMonth.monthPrefix ?? monthPrefix),
-      totalSavings: Number(rawMonth.totalSavings ?? rawMonth.monthlySavings ?? 0),
-      savingDays: Number(rawMonth.savingDays ?? 0),
-      transactionCount: Number(rawMonth.transactionCount ?? 0),
-    };
-
-    const rawCal = (raw.calendarActivity || {}) as Record<string, unknown>;
-    const calendarActivity: CalendarActivity = {
-      year: Number(rawCal.year ?? year),
-      month: Number(rawCal.month ?? month),
-      daysInMonth: Number(rawCal.daysInMonth ?? getDaysInMonth(year, month)),
-      monthlyTotal: Number(rawCal.monthlyTotal ?? rawCal.monthlySavings ?? 0),
-      savingDays: Number(rawCal.savingDays ?? rawCal.activeDaysCount ?? 0),
-      days: ((rawCal.days || rawCal.activityByDate || {}) as Record<
-        string,
-        CalendarDayActivity
-      >),
-    };
-
-    return {
-      transactions: rawTxns,
-      totalSavings: Math.round(totalSavings * 100) / 100,
-      currentGoal: normalizeGoal(
-        raw.currentGoal as Record<string, unknown> | null,
-        totalSavings
-      ),
-      settings: { currency },
-      thisMonth,
-      calendarActivity,
-      dateWiseSavings:
-        (raw.dateWiseSavings as Record<string, CalendarDayActivity>) ||
-        buildDateWiseFromTransactions(rawTxns),
-    };
-  } catch (err) {
-    // Compatibility fallback if the deployed Apps Script implements individual
-    // actions (getTransactions, getTotalSavings, getMonthlySavings, getCurrentGoal,
-    // getCalendarActivity) instead of the combined getBootstrapData action.
-    if (!(err instanceof VaultApiError) || err.code !== 'UNKNOWN_ACTION') {
-      throw err;
-    }
-
-    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-    const [txnsRes, totalRes, monthlyRes, goalRes, calRes] = await Promise.all([
-      callAppsScript<Record<string, unknown>>(config, 'getTransactions'),
-      callAppsScript<Record<string, unknown>>(config, 'getTotalSavings'),
-      callAppsScript<Record<string, unknown>>(config, 'getMonthlySavings', {
-        year,
-        month: monthKey,
-      }),
-      callAppsScript<Record<string, unknown>>(config, 'getCurrentGoal'),
-      callAppsScript<Record<string, unknown>>(config, 'getCalendarActivity', {
-        year,
-        month: monthKey,
-      }),
-    ]);
-
-    const transactions = Array.isArray(txnsRes.transactions)
-      ? (txnsRes.transactions as Record<string, unknown>[]).map(normalizeTransaction)
-      : [];
-    transactions.sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      return a.createdAt < b.createdAt ? 1 : -1;
-    });
-
-    const totalSavings = Number(
-      totalRes.totalSavings ?? transactions.reduce((sum, t) => sum + t.amount, 0)
-    );
-    const currency = normalizeCurrency(
-      txnsRes.currency ?? totalRes.currency ?? goalRes.currency
-    );
-
-    const monthTransactions = transactions.filter((t) => t.date.startsWith(monthKey));
-    const uniqueSavingDays = new Set(monthTransactions.map((t) => t.date)).size;
-    const thisMonth: MonthlySummary = {
-      year,
-      month,
-      monthPrefix: monthKey,
-      totalSavings: Number(
-        monthlyRes.totalSavings ??
-          monthlyRes.monthlySavings ??
-          monthTransactions.reduce((sum, t) => sum + t.amount, 0)
-      ),
-      savingDays: Number(
-        monthlyRes.savingDays ?? calRes.activeDaysCount ?? uniqueSavingDays
-      ),
-      transactionCount: Number(monthlyRes.transactionCount ?? monthTransactions.length),
-    };
-
-    const dateWiseSavings = buildDateWiseFromTransactions(transactions);
-    const daysMap: Record<string, CalendarDayActivity> = {};
-    for (const [dateKey, entry] of Object.entries(dateWiseSavings)) {
-      if (dateKey.startsWith(monthKey)) {
-        daysMap[dateKey] = entry;
-      }
-    }
-
-    const calendarActivity: CalendarActivity = {
-      year,
-      month,
-      daysInMonth: getDaysInMonth(year, month),
-      monthlyTotal: Number(calRes.monthlyTotal ?? calRes.monthlySavings ?? thisMonth.totalSavings),
-      savingDays: Number(calRes.savingDays ?? calRes.activeDaysCount ?? uniqueSavingDays),
-      days: daysMap,
-    };
-
-    const currentGoal = normalizeGoal(
-      goalRes.goal as Record<string, unknown> | null,
-      totalSavings,
-      {
-        completionPercentage: Number(goalRes.completionPercentage ?? 0),
-        remainingAmount: Number(goalRes.remainingAmount ?? 0),
-      }
-    );
-
-    return {
-      transactions,
-      totalSavings: Math.round(totalSavings * 100) / 100,
-      currentGoal,
-      settings: { currency },
-      thisMonth,
-      calendarActivity,
-      dateWiseSavings,
-    };
-  }
-}
-
-export async function getTransactions(
-  config: VaultConnectionConfig
-): Promise<{ transactions: Transaction[]; count: number }> {
-  const res = await callAppsScript<{ transactions: Record<string, unknown>[]; count: number }>(
-    config,
-    'getTransactions'
+  const raw = await callVault<Record<string, unknown>>('getBootstrapData', { year, month });
+  const rawTxns = Array.isArray(raw.transactions)
+    ? (raw.transactions as Record<string, unknown>[]).map(normalizeTransaction)
+    : [];
+  const totalSavings =
+    typeof raw.totalSavings === 'number'
+      ? raw.totalSavings
+      : rawTxns.reduce((sum, t) => sum + t.amount, 0);
+  const currency = normalizeCurrency(
+    (raw.settings as Record<string, unknown> | undefined)?.currency ?? raw.currency
   );
+
+  const rawMonth = (raw.thisMonth || {}) as Record<string, unknown>;
+  const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+  const thisMonth: MonthlySummary = {
+    year: Number(rawMonth.year ?? year),
+    month: Number(rawMonth.month ?? month),
+    monthPrefix: String(rawMonth.monthPrefix ?? monthPrefix),
+    totalSavings: Number(rawMonth.totalSavings ?? rawMonth.monthlySavings ?? 0),
+    savingDays: Number(rawMonth.savingDays ?? 0),
+    transactionCount: Number(rawMonth.transactionCount ?? 0),
+  };
+
+  const rawCal = (raw.calendarActivity || {}) as Record<string, unknown>;
+  const calendarActivity: CalendarActivity = {
+    year: Number(rawCal.year ?? year),
+    month: Number(rawCal.month ?? month),
+    daysInMonth: Number(rawCal.daysInMonth ?? getDaysInMonth(year, month)),
+    monthlyTotal: Number(rawCal.monthlyTotal ?? rawCal.monthlySavings ?? 0),
+    savingDays: Number(rawCal.savingDays ?? rawCal.activeDaysCount ?? 0),
+    days: (rawCal.days || rawCal.activityByDate || {}) as Record<string, CalendarDayActivity>,
+  };
+
   return {
-    transactions: Array.isArray(res.transactions) ? res.transactions.map(normalizeTransaction) : [],
-    count: Number(res.count ?? 0),
+    transactions: rawTxns,
+    totalSavings: Math.round(totalSavings * 100) / 100,
+    currentGoal: normalizeGoal(raw.currentGoal as Record<string, unknown> | null, totalSavings),
+    settings: { currency },
+    thisMonth,
+    calendarActivity,
+    dateWiseSavings:
+      (raw.dateWiseSavings as Record<string, CalendarDayActivity>) ||
+      buildDateWiseFromTransactions(rawTxns),
   };
 }
 
 export async function addTransaction(
-  config: VaultConnectionConfig,
   input: TransactionInput,
   requestId: string
 ): Promise<{ transaction: Transaction }> {
-  const res = await callAppsScript<{ transaction: Record<string, unknown> }>(
-    config,
+  const res = await callVault<{ transaction: Record<string, unknown> }>(
     'addTransaction',
     {
       date: input.date,
@@ -388,127 +334,38 @@ export async function addTransaction(
 }
 
 export async function updateTransaction(
-  config: VaultConnectionConfig,
   input: TransactionInput
 ): Promise<{ transaction: Transaction }> {
-  const payload = {
+  const res = await callVault<{ transaction: Record<string, unknown> }>('updateTransaction', {
     id: input.id,
     date: input.date,
     amount: input.amount,
     note: input.note,
+  });
+  return {
+    transaction: normalizeTransaction(res.transaction || {}),
   };
-  try {
-    const res = await callAppsScript<{ transaction: Record<string, unknown> }>(
-      config,
-      'updateTransaction',
-      payload
-    );
-    return { transaction: normalizeTransaction(res.transaction || {}) };
-  } catch (err) {
-    if (err instanceof VaultApiError && err.code === 'UNKNOWN_ACTION') {
-      const res = await callAppsScript<{ transaction: Record<string, unknown> }>(
-        config,
-        'editTransaction',
-        payload
-      );
-      return { transaction: normalizeTransaction(res.transaction || {}) };
-    }
-    throw err;
-  }
 }
 
-export async function deleteTransaction(
-  config: VaultConnectionConfig,
-  id: string
-): Promise<{ deletedId: string }> {
-  return callAppsScript<{ deletedId: string }>(config, 'deleteTransaction', { id });
-}
-
-export async function getTotalSavings(
-  config: VaultConnectionConfig
-): Promise<{ totalSavings: number; transactionCount: number }> {
-  return callAppsScript<{ totalSavings: number; transactionCount: number }>(
-    config,
-    'getTotalSavings'
-  );
-}
-
-export async function getMonthlySavings(
-  config: VaultConnectionConfig,
-  year: number,
-  month: number
-): Promise<MonthlySummary> {
-  return callAppsScript<MonthlySummary>(config, 'getMonthlySavings', { year, month });
-}
-
-export async function getDateWiseSavings(
-  config: VaultConnectionConfig
-): Promise<{ dateWiseSavings: Record<string, CalendarDayActivity> }> {
-  return callAppsScript<{ dateWiseSavings: Record<string, CalendarDayActivity> }>(
-    config,
-    'getDateWiseSavings'
-  );
-}
-
-export async function getCurrentGoal(
-  config: VaultConnectionConfig
-): Promise<{ goal: SavingsGoal | null }> {
-  return callAppsScript<{ goal: SavingsGoal | null }>(config, 'getCurrentGoal');
+export async function deleteTransaction(id: string): Promise<{ deletedId: string }> {
+  return callVault<{ deletedId: string }>('deleteTransaction', { id });
 }
 
 export async function upsertGoal(
-  config: VaultConnectionConfig,
   input: GoalInput,
   requestId: string
 ): Promise<{ goal: SavingsGoal | null }> {
-  const payload = {
-    goalId: input.goalId || '',
-    goalName: input.goalName,
-    targetAmount: input.targetAmount,
-  };
-  try {
-    return await callAppsScript<{ goal: SavingsGoal }>(
-      config,
-      'upsertGoal',
-      payload,
-      requestId
-    );
-  } catch (err) {
-    if (err instanceof VaultApiError && err.code === 'UNKNOWN_ACTION') {
-      return callAppsScript<{ goal: SavingsGoal }>(
-        config,
-        'saveGoal',
-        payload,
-        requestId
-      );
-    }
-    throw err;
-  }
+  return callVault<{ goal: SavingsGoal | null }>(
+    'upsertGoal',
+    {
+      goalId: input.goalId || '',
+      goalName: input.goalName,
+      targetAmount: input.targetAmount,
+    },
+    requestId
+  );
 }
 
-export async function getCalendarActivity(
-  config: VaultConnectionConfig,
-  year: number,
-  month: number
-): Promise<CalendarActivity> {
-  return callAppsScript<CalendarActivity>(config, 'getCalendarActivity', { year, month });
-}
-
-export async function updateSettings(
-  config: VaultConnectionConfig,
-  currency: CurrencyCode
-): Promise<{ currency: CurrencyCode }> {
-  try {
-    return await callAppsScript<{ currency: CurrencyCode }>(config, 'updateSettings', {
-      currency,
-    });
-  } catch (err) {
-    if (err instanceof VaultApiError && err.code === 'UNKNOWN_ACTION') {
-      throw new VaultApiError(
-        'UPDATE_REQUIRED',
-        'Please redeploy the latest apps-script/Code.gs Web App version to persist currency settings.'
-      );
-    }
-    throw err;
-  }
+export async function updateSettings(currency: CurrencyCode): Promise<{ currency: CurrencyCode }> {
+  return callVault<{ currency: CurrencyCode }>('updateSettings', { currency });
 }

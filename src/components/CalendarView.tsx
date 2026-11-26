@@ -39,7 +39,7 @@ export function CalendarView({
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const firstWeekday = getFirstWeekdayOfMonth(viewYear, viewMonth);
 
-  // Build date-wise map from actual transactions
+  // Build date-wise map from actual transactions (preserved calculation)
   const dateMap = useMemo(() => {
     const map: Record<string, { total: number; items: Transaction[] }> = {};
     for (const txn of transactions) {
@@ -102,11 +102,10 @@ export function CalendarView({
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
       {/* Monthly Calendar Grid */}
-      <section className="rounded-xl border border-[#262626] bg-[#141414] p-4 sm:p-6 lg:col-span-8">
-        {/* Calendar Header & Month Stats */}
-        <div className="flex flex-col gap-4 border-b border-[#262626] pb-5 sm:flex-row sm:items-center sm:justify-between">
+      <section className="rounded-2xl border border-[#292929] bg-[#141414] p-4 shadow-[0_12px_36px_rgba(0,0,0,0.35)] sm:p-6 lg:col-span-8">
+        <div className="flex flex-col gap-4 border-b border-[#292929] pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="font-display text-lg font-semibold text-white">
               {formatMonthYear(viewYear, viewMonth)}
             </h2>
             <p className="mt-1 font-mono text-xs tabular-nums text-[#929292]">
@@ -123,14 +122,14 @@ export function CalendarView({
               type="button"
               onClick={goToPreviousMonth}
               aria-label="Previous month"
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#262626] bg-[#1B1B1B] text-white transition-colors hover:border-[#3a3a3a]"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#292929] bg-[#1C1C1C] text-white transition-colors hover:border-[#3d3d3d]"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={goToToday}
-              className="h-10 rounded-lg border border-[#262626] bg-[#1B1B1B] px-3.5 text-xs font-medium text-white transition-colors hover:border-[#35C98A]/50"
+              className="h-10 rounded-xl border border-[#292929] bg-[#1C1C1C] px-3.5 text-xs font-medium text-white transition-colors hover:border-[#35C98A]/50"
             >
               Today
             </button>
@@ -138,7 +137,7 @@ export function CalendarView({
               type="button"
               onClick={goToNextMonth}
               aria-label="Next month"
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#262626] bg-[#1B1B1B] text-white transition-colors hover:border-[#3a3a3a]"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#292929] bg-[#1C1C1C] text-white transition-colors hover:border-[#3d3d3d]"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -172,12 +171,12 @@ export function CalendarView({
                 key={iso}
                 type="button"
                 onClick={() => setSelectedDate(iso)}
-                className={`relative flex h-16 flex-col items-start justify-between rounded-lg border p-1.5 text-left transition-colors sm:h-20 sm:p-2 ${
+                className={`relative flex h-16 flex-col items-start justify-between rounded-xl border p-1.5 text-left transition-all duration-150 sm:h-20 sm:p-2 ${
                   isSelected
                     ? 'border-[#35C98A] bg-[#35C98A]/12'
                     : hasSaving
-                      ? 'border-[#35C98A]/35 bg-[#1B1B1B] hover:border-[#35C98A]/65'
-                      : 'border-[#262626] bg-[#090909]/60 hover:border-[#3a3a3a]'
+                      ? 'border-[#35C98A]/35 bg-[#1C1C1C] hover:border-[#35C98A]/65'
+                      : 'border-[#292929] bg-[#080808]/60 hover:border-[#3d3d3d]'
                 }`}
               >
                 <div className="flex w-full items-center justify-between">
@@ -210,7 +209,7 @@ export function CalendarView({
                     </span>
                   </span>
                 ) : (
-                  <span className="text-[10px] text-transparent select-none">-</span>
+                  <span className="select-none text-[10px] text-transparent">-</span>
                 )}
               </button>
             );
@@ -219,11 +218,11 @@ export function CalendarView({
       </section>
 
       {/* Selected Date Detail Panel */}
-      <section className="flex flex-col justify-between rounded-xl border border-[#262626] bg-[#141414] p-6 lg:col-span-4">
+      <section className="flex flex-col justify-between rounded-2xl border border-[#292929] bg-[#141414] p-6 shadow-[0_12px_36px_rgba(0,0,0,0.35)] lg:col-span-4">
         <div className="space-y-5">
-          <div className="border-b border-[#262626] pb-4">
+          <div className="border-b border-[#292929] pb-4">
             <p className="text-xs text-[#929292]">Selected Date</p>
-            <h3 className="mt-1 text-base font-semibold text-white">
+            <h3 className="mt-1 font-display text-base font-semibold text-white">
               {formatLongDate(selectedDate)}
             </h3>
             <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-[#35C98A]">
@@ -236,14 +235,14 @@ export function CalendarView({
           </div>
 
           {selectedDayRecord.items.length === 0 ? (
-            <div className="py-6 text-center">
+            <div className="py-8 text-center">
               <p className="text-sm font-medium text-white">No savings on this date</p>
               <p className="mt-1 text-xs text-[#929292]">
                 Record a deposit specifically for this date if needed.
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-[#262626]">
+            <div className="divide-y divide-[#292929]">
               {selectedDayRecord.items.map((txn) => (
                 <div key={txn.id} className="flex items-start justify-between gap-3 py-3">
                   <div className="min-w-0 flex-1">
@@ -259,7 +258,7 @@ export function CalendarView({
                       type="button"
                       onClick={() => onEditTransaction(txn)}
                       aria-label={`Edit transaction from ${txn.date}`}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-[#929292] transition-colors hover:bg-[#1B1B1B] hover:text-white"
+                      className="flex h-9 w-9 items-center justify-center rounded-xl text-[#929292] transition-colors hover:bg-[#1C1C1C] hover:text-white"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
@@ -267,7 +266,7 @@ export function CalendarView({
                       type="button"
                       onClick={() => onDeleteTransaction(txn)}
                       aria-label={`Delete transaction from ${txn.date}`}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-[#929292] transition-colors hover:bg-red-500/10 hover:text-red-400"
+                      className="flex h-9 w-9 items-center justify-center rounded-xl text-[#929292] transition-colors hover:bg-red-500/10 hover:text-red-400"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -281,7 +280,7 @@ export function CalendarView({
         <button
           type="button"
           onClick={() => onAddSavingForDate(selectedDate)}
-          className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#35C98A] px-4 text-sm font-semibold text-[#090909] transition-colors hover:bg-[#2eb57b]"
+          className="mt-6 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#35C98A] px-4 text-sm font-semibold text-[#080808] transition-colors hover:bg-[#2eb57b]"
         >
           <Plus className="h-4 w-4" />
           <span>Add Saving for Date</span>

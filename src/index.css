@@ -5,24 +5,24 @@
   --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-obsidian-bg: #090909;
+  --color-obsidian-bg: #080808;
   --color-obsidian-card: #141414;
-  --color-obsidian-elevated: #1B1B1B;
-  --color-obsidian-border: #262626;
+  --color-obsidian-elevated: #1C1C1C;
+  --color-obsidian-border: #292929;
   --color-obsidian-muted: #929292;
   --color-obsidian-accent: #35C98A;
 }
 
 @layer base {
   html {
-    background-color: #090909;
+    background-color: #080808;
     color: #ffffff;
     font-family: var(--font-sans);
     color-scheme: dark;
   }
 
   body {
-    background-color: #090909;
+    background-color: #080808;
     color: #ffffff;
     overflow-x: hidden;
   }
@@ -36,23 +36,35 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Custom subtle scrollbars for dark theme */
+@keyframes pin-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.animate-pin-shake {
+  animation: pin-shake 0.32s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* Custom subtle scrollbars for dark obsidian theme */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #090909;
+  background: #080808;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #262626;
+  background: #292929;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3a;
+  background: #3d3d3d;
 }
 
 @media (prefers-reduced-motion: reduce) {

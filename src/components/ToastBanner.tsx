@@ -20,8 +20,8 @@ export function ToastBanner({ toasts, onDismiss }: ToastBannerProps) {
           <div
             key={toast.id}
             role="status"
-            className={`flex items-start gap-3 rounded-xl border bg-[#141414] px-4 py-3 shadow-lg transition-all duration-150 ${
-              isSuccess ? 'border-[#35C98A]/40' : 'border-red-500/40'
+            className={`flex items-start gap-3 rounded-xl border bg-[#141414] px-4 py-3 shadow-[0_14px_32px_rgba(0,0,0,0.55)] transition-all duration-150 ${
+              isSuccess ? 'border-[#35C98A]/45' : 'border-red-500/45'
             }`}
           >
             {isSuccess ? (
@@ -34,7 +34,7 @@ export function ToastBanner({ toasts, onDismiss }: ToastBannerProps) {
               type="button"
               onClick={() => onDismiss(toast.id)}
               aria-label="Dismiss notification"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#929292] transition-colors hover:bg-[#1B1B1B] hover:text-white"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[#929292] transition-colors hover:bg-[#1C1C1C] hover:text-white"
             >
               <X className="h-3.5 w-3.5" />
             </button>
