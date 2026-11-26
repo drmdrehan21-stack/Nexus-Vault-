@@ -61,12 +61,12 @@ Starts the unified Express + Vite server on `http://localhost:3000`.
 ## 4. GitHub & Cloudflare Pages Deployment
 
 1. Push the repository to GitHub (`git push -u origin main`).
-2. In **Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git**:
+2. In **Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git** (or via CLI with `npx wrangler pages deploy`):
    - **Framework preset:** `Vite`
    - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
+   - **Build output directory:** `dist` (configured in `wrangler.jsonc`)
 3. Under **Settings → Environment variables (Production & Preview)**, add:
    - `APPS_SCRIPT_URL`
    - `VAULT_ACCESS_KEY`
    - `SESSION_SECRET`
-4. Deploy. `/functions/api/[[route]].ts` automatically handles `/api/auth/*` and `/api/vault` on Cloudflare Pages.
+4. Deploy. Cloudflare Pages automatically serves `index.html` for client-side SPA routes (no `_redirects` catch-all or `404.html` needed), and `/functions/api/[[route]].ts` handles `/api/auth/*` and `/api/vault`.
