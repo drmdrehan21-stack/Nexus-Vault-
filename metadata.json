@@ -1,0 +1,6 @@
+{
+  "name": "Nexus Vault",
+  "description": "Save Today. Secure Tomorrow. Personal savings management powered by Google Sheets and Google Apps Script.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
